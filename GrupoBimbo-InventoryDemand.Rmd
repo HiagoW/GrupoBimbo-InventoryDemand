@@ -1,0 +1,250 @@
+---
+title: "GrupoBimbo-InventoryDemanda"
+author: "Hiago W. Petris"
+date: "7/17/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Carregando dados e pacotes
+
+```{r carregando}
+library(readr)
+library(dplyr)
+library(caret)
+library(ggplot2)
+library(mltools)
+library(e1071)
+library(stringr)
+
+# Lendo os arquivos
+df <- read_csv('C:/Users/hiago/Downloads/datasets/train.csv')
+df_cliente <- read_csv('C:/Users/hiago/Downloads/datasets/cliente_tabla.csv')
+df_producto <- read_csv('C:/Users/hiago/Downloads/datasets/producto_tabla.csv')
+df_town <- read_csv('C:/Users/hiago/Downloads/datasets/town_state.csv')
+df_test <- read_csv('C:/Users/hiago/Downloads/datasets/test.csv')
+```
+
+## Pré processamento
+
+```{r processamento}
+head(df)
+str(df)
+
+head(df_cliente)
+str(df_cliente)
+
+head(df_producto)
+str(df_producto)
+
+head(df_town)
+str(df_town)
+
+# Os datasets cliente, producto e town não serão relevantes para o processo de predição
+# pois contém apenas descrições de Ids referenciados no DF principal.
+# Porém podem ser úteis no processo de análise
+
+# Selecionado apenas varáveis preditoras + target
+# As variáveis Venta_uni_hot, venta_hoy, dev_uni_proxima e dev_proxima não estão no
+# df de teste, pois a variável target é resultado de cálculos a partir dessas variáveis
+
+df <- df %>% select(Semana, Agencia_ID, Canal_ID, Ruta_SAK, Cliente_ID, Producto_ID, Demanda_uni_equil)
+
+head(df)
+
+# Sub sampling
+df_sample <- df %>% sample_n(50000)
+
+# Analisando distribuição da variável target
+ggplot(df_sample,aes(x=Demanda_uni_equil)) +
+  geom_bar()
+
+ggplot(df_sample,aes(x=Demanda_uni_equil)) +
+  geom_density()
+
+ggplot(df_sample,aes(x=Demanda_uni_equil)) +
+  geom_boxplot()
+
+# Seleciona apenas os dados até o percentil 90
+df_2 <- df_sample %>% filter(Demanda_uni_equil < quantile(df_sample$Demanda_uni_equil,0.9))
+
+# Analisando novamente a distribuição da variável
+ggplot(df_2,aes(x=Demanda_uni_equil)) +
+  geom_bar()
+
+ggplot(df_2,aes(x=Demanda_uni_equil)) +
+  geom_density()
+
+ggplot(df_2,aes(x=Demanda_uni_equil)) +
+  geom_boxplot()
+
+# ---------------------- Análise exploratória -----------------------
+
+# Demandas por semana
+ggplot(df_sample,aes(fill=Semana,x=Semana, y=Demanda_uni_equil)) + 
+  geom_bar(stat='identity')
+
+# Clientes com mais demanda
+
+df_demanda_por_cliente <- df_2 %>%
+  group_by(Cliente_ID) %>% summarise(Total = sum(Demanda_uni_equil)) %>%
+  arrange(desc(Total)) %>% top_n(10)
+
+head(df_demanda_por_cliente)
+
+df_demanda_por_cliente <- merge(df_demanda_por_cliente, df_cliente, by='Cliente_ID')
+
+df_demanda_por_cliente <- df_demanda_por_cliente %>% arrange(desc(Total))
+
+df_demanda_por_cliente$NombraclienteId <- str_c(df_demanda_por_cliente$NombreCliente,'-',df_demanda_por_cliente$Cliente_ID)
+
+head(df_demanda_por_cliente)
+
+df_demanda_por_cliente$NombraclienteId <- factor(df_demanda_por_cliente$NombraclienteId, levels=df_demanda_por_cliente$NombraclienteId)
+
+ggplot(df_demanda_por_cliente,aes(fill=NombreCliente,x=NombraclienteId, y=Total)) + 
+  geom_bar(stat='identity') +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none") +
+  scale_fill_hue(l=40, c=35) +
+  ggtitle("Demanda por cliente") +
+  xlab("Cliente")
+
+# Produtos com mais demanda
+df_demanda_por_produto <- df_2 %>% select(Producto_ID, Demanda_uni_equil) %>%
+  group_by(Producto_ID) %>% summarise(Total = sum(Demanda_uni_equil)) %>%
+  arrange(desc(Total)) %>% top_n(10)
+
+head(df_demanda_por_produto)
+
+df_demanda_por_produto <- merge(df_demanda_por_produto, df_producto, by='Producto_ID')
+
+df_demanda_por_produto <- df_demanda_por_produto %>% arrange(desc(Total))
+
+head(df_demanda_por_produto)
+
+df_demanda_por_produto$NombreProducto <- factor(df_demanda_por_produto$NombreProducto, levels=df_demanda_por_produto$NombreProducto)
+
+ggplot(df_demanda_por_produto,aes(fill=NombreProducto,x=NombreProducto, y=Total)) + 
+  geom_bar(stat='identity') +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none") +
+  scale_fill_hue(l=40, c=35) +
+  ggtitle("Demanda por produto") +
+  xlab("Produto")
+
+# Cidades com mais demanda
+df_demanda_por_cidade <- df_2 %>% select(Agencia_ID, Demanda_uni_equil) %>%
+  group_by(Agencia_ID) %>% summarise(Total = sum(Demanda_uni_equil)) %>%
+  arrange(desc(Total)) %>% top_n(10)
+
+head(df_demanda_por_cidade)
+
+df_demanda_por_cidade <- merge(df_demanda_por_cidade, df_town, by='Agencia_ID')
+
+df_demanda_por_cidade <- df_demanda_por_cidade %>% arrange(desc(Total))
+
+head(df_demanda_por_cidade)
+
+df_demanda_por_cidade$Town <- factor(df_demanda_por_cidade$Town, levels=df_demanda_por_cidade$Town)
+
+ggplot(df_demanda_por_cidade,aes(fill=Town,x=Town, y=Total)) + 
+  geom_bar(stat='identity') +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none") +
+  scale_fill_hue(l=40, c=35) +
+  ggtitle("Demanda por cidade") +
+  xlab("Cidade")
+
+# Estados com mais demanda
+df_demanda_por_estado <- df_2 %>% select(Agencia_ID, Demanda_uni_equil)
+
+head(df_demanda_por_estado)
+
+df_demanda_por_estado <- merge(df_demanda_por_estado, df_town, by='Agencia_ID')
+
+head(df_demanda_por_estado)
+
+df_demanda_por_estado <- df_demanda_por_estado %>%
+  group_by(State) %>% summarise(Total = sum(Demanda_uni_equil)) %>%
+  arrange(desc(Total)) %>% top_n(10)
+
+head(df_demanda_por_estado)
+
+df_demanda_por_estado$State <- factor(df_demanda_por_estado$State, levels=df_demanda_por_estado$State)
+
+ggplot(df_demanda_por_estado,aes(fill=State,x=State, y=Total)) + 
+  geom_bar(stat='identity') +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), legend.position = "none") +
+  scale_fill_hue(l=40, c=35) +
+  ggtitle("Demanda por estado") +
+  xlab("Estado")
+# -------------------- Dividindo em dados de treino e de teste ----------------------
+amostra <- createDataPartition(df_2$Demanda_uni_equil,p=0.7,list=F)
+testData <- df_2[amostra,]
+trainData <- df_2[-amostra,]
+```
+
+## Modelos
+
+```{r modelos}
+# Criando um modelo LM com todas variáveis
+modelo_lm_v1 <- lm(Demanda_uni_equil ~ .,data=trainData)
+
+summary(modelo_lm_v1)
+
+predictions <- predict(modelo_lm_v1,testData)
+
+# rmsle: Root Mean Square Logarithmic Error
+# 0.599
+rmsle(predictions, testData$Demanda_uni_equil)
+
+# Modelo 2 com variáveis mais significativas
+modelo_lm_v2 <- lm(Demanda_uni_equil ~ Canal_ID + Ruta_SAK + Cliente_ID + Producto_ID, data=trainData)
+
+summary(modelo_lm_v2)
+
+predictions_2 <- predict(modelo_lm_v2,testData)
+
+# RMSLE = 0.599 -> igual anterior
+rmsle(predictions_2, testData$Demanda_uni_equil)
+
+# KNN
+modelo_knn_v1 <- knnreg(Demanda_uni_equil ~ ., data=trainData)
+
+summary(modelo_knn_v1)
+
+predictions_3 <- predict(modelo_knn_v1, testData)
+
+# 0.6526 -> Pior que os outros
+rmsle(predictions_3, testData$Demanda_uni_equil)
+
+# SVR
+modelo_svr_v1 <- svm(Demanda_uni_equil ~ ., data=trainData)
+
+summary(modelo_svr_v1)
+
+predictions_4 <- predict(modelo_svr_v1, testData)
+
+# 0.577 -> Melhor resultado até o momento 
+rmsle(predictions_4, testData$Demanda_uni_equil)
+
+# SVR - v2
+modelo_svr_v2 <- svm(Demanda_uni_equil ~ Canal_ID + Ruta_SAK + Cliente_ID + Producto_ID, data=trainData)
+
+summary(modelo_svr_v2)
+
+predictions_5 <- predict(modelo_svr_v2, testData)
+
+# 0.576 -> Um pouco melhor que o anterior
+rmsle(predictions_5, testData$Demanda_uni_equil)
+```
+
+## Avaliação
+
+```{r avaliacao}
+# Plot Residuals
+resid <- resid(modelo_svr_v2)
+plot(trainData$Demanda_uni_equil, resid)
+plot(y=predictions_5, x=testData$Demanda_uni_equil)
+```
