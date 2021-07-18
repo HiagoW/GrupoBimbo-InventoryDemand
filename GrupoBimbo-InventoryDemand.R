@@ -220,7 +220,7 @@ modelo_svr_v2 <- svm(Demanda_uni_equil ~ Canal_ID + Ruta_SAK + Cliente_ID + Prod
 summary(modelo_svr_v2)
 
 predictions_5 <- predict(modelo_svr_v2, testData)
-
+head(data.frame(predictions_5))
 # 0.576 -> Um pouco melhor que o anterior
 rmsle(predictions_5, testData$Demanda_uni_equil)
 
@@ -229,3 +229,37 @@ rmsle(predictions_5, testData$Demanda_uni_equil)
 resid <- resid(modelo_svr_v2)
 plot(trainData$Demanda_uni_equil, resid)
 plot(y=predictions_5, x=testData$Demanda_uni_equil)
+
+# ----------------------- Prevendo dados do Kaggle ----------------------
+df_test <- read_csv('C:/Users/hiago/Downloads/datasets/test.csv')
+
+head(df_test)
+
+df_preds <- data.frame(id=df_test$id)
+
+df_test$Semana = NULL
+df_test$Agencia_ID = NULL
+
+df_predictions <- data.frame(Demanda_uni_equil=numeric())
+head(df_predictions)
+
+nrow(df_test)
+
+for(i in seq(1,nrow(df_test), by=1000000)){
+  print(i)
+  if(((i+1000000)-1) < nrow(df_test)){
+    df_predictions <- rbind(df_predictions, data.frame(Demanda_uni_equil=predict(modelo_svr_v2, df_test[i:((i+1000000)-1),-1])))
+  }else{
+    df_predictions <- rbind(df_predictions, data.frame(Demanda_uni_equil=predict(modelo_svr_v2, df_test[i:nrow(df_test),-1])))
+  }
+}
+
+nrow(df_predictions)
+
+head(df_predictions)
+
+df_final <- cbind(df_preds, df_predictions)
+head(df_final)
+library(csvread)
+df_final$id = as.int64(df_final$id)
+write.table(df_final,"C:/Users/hiago/Downloads/submission.csv",sep=",",row.names = FALSE)
